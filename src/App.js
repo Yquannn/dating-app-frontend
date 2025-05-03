@@ -1,24 +1,78 @@
-import logo from './logo.svg';
-import './App.css';
+// client/src/App.js
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
+import { AuthProvider } from './context/AuthContext';
+import PrivateRoute from './components/PrivateRoute';
+
+// Components
+import Navbar from './components/Navbar';
+import Login from './components/Login';
+import Register from './components/Register';
+import Profile from './components/Profile';
+import Discover from './components/Discover';
+import Matches from './components/Matches';
+import Chat from './components/Chat';
+
+const theme = createTheme({
+  palette: {
+    primary: {
+      main: '#ff4081',
+    },
+    secondary: {
+      main: '#3f51b5',
+    },
+  },
+});
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <AuthProvider>
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <BrowserRouter>
+          <Navbar />
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route 
+              path="/profile" 
+              element={
+                <PrivateRoute>
+                  <Profile />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
+              path="/discover" 
+              element={
+                <PrivateRoute>
+                  <Discover />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
+              path="/matches" 
+              element={
+                <PrivateRoute>
+                  <Matches />
+                </PrivateRoute>
+              } 
+            />
+            <Route 
+              path="/chat/:matchId" 
+              element={
+                <PrivateRoute>
+                  <Chat />
+                </PrivateRoute>
+              } 
+            />
+            <Route path="/" element={<Navigate to="/discover" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 
