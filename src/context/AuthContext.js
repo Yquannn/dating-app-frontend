@@ -2,7 +2,7 @@
 import React, { createContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
-const baseURL = 'https://dating-app-backend-hpju.onrender.com ';
+const baseURL =  process.env.REACT_APP_API_URL ||'http://localhost:5000';
 axios.defaults.baseURL = baseURL;
 console.log('Using API URL:', baseURL);
 

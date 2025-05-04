@@ -52,7 +52,7 @@ const Chat = () => {
   
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io(process.env.REACT_APP_API_URL || 'https://dating-app-backend-hpju.onrender.com ', {
+    const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
       transports: ['websocket'],
       upgrade: false,
       reconnection: true,
