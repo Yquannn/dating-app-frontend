@@ -188,18 +188,22 @@ useEffect(() => {
     }
   };
   
-  // Show push notification
+  // Show push notification with sender's profile as icon
   const showPushNotification = (message) => {
     if (notificationPermission === 'granted' && matchInfo) {
+      // Get the sender's profile photo (partner's photo for received messages)
+      const senderPhoto = matchInfo.partner?.photos?.[0] || '/logo192.png';
+      
       const notificationOptions = {
         body: message.text,
-        icon: '/logo192.png', // Replace with your PWA icon
+        icon: senderPhoto, // Use sender's profile photo as icon
         badge: '/badge.png', // Small badge icon
         vibrate: [100, 50, 100],
         data: {
           dateOfArrival: Date.now(),
           primaryKey: message._id,
-          chatId: matchId
+          chatId: matchId,
+          messageId: message._id
         },
         actions: [
           {
@@ -244,58 +248,21 @@ useEffect(() => {
     }
   };
   
-  // Test push notification function
-  const testPushNotification = async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      alert('Push notifications not supported in this browser');
-      return;
-    }
-
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      
-      // Check if already subscribed or subscribe
-      let subscription = await registration.pushManager.getSubscription();
-      
-      if (!subscription) {
-        const publicKey = process.env.REACT_APP_VAPID_PUBLIC_KEY; // Replace with your actual VAPID key
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey)
-        });
+  // Handle visibility change
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // User came back to the tab, mark messages as read if needed
+        console.log('User is back, marking messages as read');
       }
-      
-      // Test notification options
-      const message = {
-        title: 'New Message',
-        body: messageText,
-        chatId: matchId,
-        messageId: 'test-msg-' + Date.now()
-      };
-      
-      // Show notification directly (for testing)
-      registration.showNotification(message.title, {
-        body: message.body,
-        icon: '/logo192.png',
-        badge: '/badge.png',
-        data: message,
-        vibrate: [100, 50, 100],
-        actions: [
-          {
-            action: 'view',
-            title: 'View',
-            icon: '/view-icon.png'
-          }
-        ]
-      });
-      
-      console.log('Test notification sent');
-      setShowNotificationMessage(true);
-    } catch (error) {
-      console.error('Error testing notification:', error);
-      alert('Error testing notification: ' + error.message);
-    }
-  };
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
   
   // Join chat room and set up event listeners
   useEffect(() => {
@@ -316,8 +283,8 @@ useEffect(() => {
       console.log('📨 New message received:', message);
       console.log('Message ID:', message._id, 'Sender:', message.sender);
       
-      // Check if chat is not active/in focus
-      if (document.hidden && message.sender !== userId) {
+      // Only show notification for messages from others when tab is not in focus
+      if (message.sender !== userId && document.hidden) {
         showPushNotification(message);
       }
       
@@ -480,7 +447,6 @@ useEffect(() => {
       console.log('Socket status:', socket.connected ? 'connected' : 'disconnected');
       socket.emit('send_message', messageData);
       console.log('Message emitted through socket');
-      testPushNotification(messageData); // Test push notification
     } else {
       console.error('Socket not connected, cannot emit message');
     }
@@ -509,11 +475,6 @@ useEffect(() => {
       alert('Failed to send message. Please try again.');
     }
   };
-
-
-
-
-
   
   const formatMessageTime = (timestamp) => {
     const date = new Date(timestamp);
@@ -699,22 +660,6 @@ useEffect(() => {
                 )}
               </Box>
               
-              {/* Test Notification Button in Header */}
-              {/* <Button 
-                onClick={testPushNotification}
-                variant="contained"
-                color="secondary"
-                size="small"
-                sx={{ 
-                  ml: 1,
-                  minWidth: 'auto',
-                  px: 1.5
-                }}
-                disabled={!registrationAvailable}
-              >
-                Test
-              </Button>
-               */}
               <IconButton 
                 color="inherit"
                 onClick={handleMenuOpen}
@@ -956,72 +901,56 @@ useEffect(() => {
             multiline
             maxRows={4}
             sx={{ 
-              '& .MuiOutlinedInput-root': {
-                borderRadius: 5,
-                backgroundColor: '#f5f7fa',
-                '&:hover': {
-                  backgroundColor: '#f0f2f5',
-                },
-                '&.Mui-focused': {
-                  backgroundColor: 'white',
-                }
-              }
-            }}
-          />
-          <IconButton 
-            color="primary" 
-            onClick={handleSendMessage}
-            disabled={!newMessage.trim()}
-            sx={{ 
-              backgroundColor: 'primary.main',
-              color: 'white',
-              '&:hover': {
-                backgroundColor: 'primary.dark',
-              },
-              '&:disabled': {
-                backgroundColor: 'action.disabledBackground',
-                color: 'action.disabled'
-              }
-            }}
-          >
-            <SendIcon />
-          </IconButton>
-          
-          {/* Test Notification Button in Input Area
-          <Button 
-            onClick={testPushNotification}
-            variant="outlined"
-            color="secondary"
-            size="small"
-            startIcon={<NotificationsIcon />}
-            disabled={!registrationAvailable}
-            sx={{ 
-              minWidth: 'auto',
-              px: 1
-            }}
-          >
-            {isMobile ? 'Test' : 'Test Push'}
-          </Button> */}
-        </Box>
-      </Paper>
-      
-      {/* Notification permission snackbar */}
-      <Snackbar
-        open={showNotificationMessage}
-        autoHideDuration={6000}
-        onClose={() => setShowNotificationMessage(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert 
-          onClose={() => setShowNotificationMessage(false)} 
-          severity="success" 
-          sx={{ width: '100%' }}
-        >
-          Notifications enabled! You'll receive alerts for new messages.
-        </Alert>
-      </Snackbar>
-    </Container>
-  );
+             '& .MuiOutlinedInput-root': {
+               borderRadius: 5,
+               backgroundColor: '#f5f7fa',
+               '&:hover': {
+                 backgroundColor: '#f0f2f5',
+               },
+               '&.Mui-focused': {
+                 backgroundColor: 'white',
+               }
+             }
+           }}
+         />
+         <IconButton 
+           color="primary" 
+           onClick={handleSendMessage}
+           disabled={!newMessage.trim()}
+           sx={{ 
+             backgroundColor: 'primary.main',
+             color: 'white',
+             '&:hover': {
+               backgroundColor: 'primary.dark',
+             },
+             '&:disabled': {
+               backgroundColor: 'action.disabledBackground',
+               color: 'action.disabled'
+             }
+           }}
+         >
+           <SendIcon />
+         </IconButton>
+       </Box>
+     </Paper>
+     
+     {/* Notification permission snackbar */}
+     {/* <Snackbar
+       open={showNotificationMessage}
+       autoHideDuration={6000}
+       onClose={() => setShowNotificationMessage(false)}
+       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+     >
+       <Alert 
+         onClose={() => setShowNotificationMessage(false)} 
+         severity="success" 
+         sx={{ width: '100%' }}
+       >
+         Notifications enabled! You'll receive alerts for new messages.
+       </Alert>
+     </Snackbar> */}
+   </Container>
+ );
 };
 
 export default Chat;
