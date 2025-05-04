@@ -26,13 +26,13 @@ const Chat = () => {
   
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io('https://dating-app-backend-hpju.onrender.com', {
-      transports: ['websocket'],
-      upgrade: false,
-      reconnection: true,
-      reconnectionAttempts: 5
-    });
-    
+// Chat.js
+const newSocket = io(process.env.REACT_APP_API_URL || 'http://localhost:5000', {
+  transports: ['websocket'],
+  upgrade: false,
+  reconnection: true,
+  reconnectionAttempts: 5
+});
     newSocket.on('connect', () => {
       console.log('Socket connected successfully:', newSocket.id);
     });
