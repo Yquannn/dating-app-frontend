@@ -105,17 +105,14 @@ const Chat = () => {
         console.log('Socket connected successfully:', newSocket.id);
         // Emit join_chat immediately after connection
         if (matchId && userId) {
-          console.log('Emitting join_chat:', { chatId: matchId, userId });
           newSocket.emit('join_chat', { chatId: matchId, userId });
         }
       });
       
       newSocket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
       });
       
       newSocket.on('disconnect', (reason) => {
-        console.log('Socket disconnected:', reason);
         // Attempt immediate reconnection for certain disconnect reasons
         if (reason === 'io server disconnect') {
           newSocket.connect();
@@ -272,53 +269,67 @@ useEffect(() => {
     console.log('Current socket:', socket.id);
     console.log('MatchId:', matchId, 'UserId:', userId);
     
-    // Important: Join chat room when socket is connected
-    if (socket.connected) {
-      console.log('Emitting join_chat:', { chatId: matchId, userId });
-      socket.emit('join_chat', { chatId: matchId, userId });
-    }
-    
     // Set up message listener
     const messageListener = (message) => {
       console.log('📨 New message received:', message);
       console.log('Message ID:', message._id, 'Sender:', message.sender);
       
-      // Only show notification for messages from others when tab is not in focus
-      if (message.sender !== userId && document.hidden) {
-        showPushNotification(message);
-      }
-      
       setMessages((prevMessages) => {
         console.log('Current messages:', prevMessages.length);
         
-        // Update temporary message if it exists
-        const tempMessageIndex = prevMessages.findIndex(
-          m => m._id?.startsWith('temp-') && 
-             m.sender === message.sender && 
-             m.text === message.text
-        );
+        // Ensure every message has a unique ID
+        const messageId = message._id || message.id || `socket-${Date.now()}-${message.sender}-${Math.random().toString(36).substr(2, 9)}`;
         
-        if (tempMessageIndex !== -1) {
-          console.log('Updating temporary message at index:', tempMessageIndex);
-          const newMessages = [...prevMessages];
-          newMessages[tempMessageIndex] = message;
-          return newMessages;
-        }
+        // Create a message with guaranteed ID
+        const messageWithId = {
+          ...message,
+          _id: messageId
+        };
         
-        // Check if message already exists
-        const exists = prevMessages.some(m => m._id === message._id);
+        // Check for duplicate messages more carefully
+        const isDuplicate = prevMessages.some(m => {
+          // Check by ID if both messages have IDs
+          if (m._id && messageWithId._id) {
+            return m._id === messageWithId._id;
+          }
+          
+          // Also check by content and timestamp for messages without ID
+          const timeDiff = Math.abs(
+            new Date(m.createdAt) - new Date(messageWithId.createdAt)
+          );
+          
+          return (
+            m.sender === messageWithId.sender &&
+            m.text === messageWithId.text &&
+            timeDiff < 1000 // Within 1 second
+          );
+        });
         
-        if (exists) {
-          console.log('Message already exists:', message._id);
+        if (isDuplicate) {
+          console.log('Message already exists, skipping...');
           return prevMessages;
         }
         
-        console.log('Adding new message:', message._id);
-        return [...prevMessages, message];
+        console.log('Adding new message with ID:', messageId);
+        
+        // Only show notification for messages from others when tab is not in focus
+        // Move notification logic outside the setMessages callback to ensure it runs
+        setTimeout(() => {
+          if (message.sender !== userId && 
+              document.hidden && 
+              notificationPermission === 'granted' && 
+              matchInfo) {
+            console.log('Showing push notification for message from:', matchInfo.partnerName);
+            showPushNotification(messageWithId);
+          }
+        }, 0);
+        
+        return [...prevMessages, messageWithId];
       });
     };
+
     
-    const typingListener = (data) => {
+  const typingListener = (data) => {
       console.log('👋 User typing:', data);
       if (data.userId !== userId) {
         setIsTyping(true);
@@ -339,7 +350,6 @@ useEffect(() => {
           return;
         }
         
-        console.log('Fetching initial data...');
         const [matchRes, messagesRes] = await Promise.all([
           axios.get(`/api/matches/${matchId}`, {
             headers: { Authorization: `Bearer ${token}` }
@@ -348,9 +358,7 @@ useEffect(() => {
             headers: { Authorization: `Bearer ${token}` }
           })
         ]);
-        
-        console.log('Fetched match info:', matchRes.data);
-        console.log('Fetched messages:', messagesRes.data.length);
+
         
         setMatchInfo(matchRes.data);
         setMessages(messagesRes.data);
@@ -368,7 +376,7 @@ useEffect(() => {
       socket.off('receive_message', messageListener);
       socket.off('user_typing', typingListener);
     };
-  }, [socket, matchId, userId]);
+  }, [socket, matchId, userId, notificationPermission, matchInfo]);
   
   const handleTyping = () => {
     if (!socket || !matchId || !userId) return;
@@ -432,21 +440,18 @@ useEffect(() => {
       createdAt: new Date().toISOString()
     };
     
-    // Create optimistic message
+    // Create optimistic message with a unique temporary ID
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const optimisticMessage = { ...messageData, _id: tempId };
     
-    console.log('📤 Sending message:', messageData);
-    console.log('Optimistic message ID:', tempId);
     
     // Add optimistic message
     setMessages(prev => [...prev, optimisticMessage]);
     
     // Emit through socket IMMEDIATELY
     if (socket.connected) {
-      console.log('Socket status:', socket.connected ? 'connected' : 'disconnected');
+   
       socket.emit('send_message', messageData);
-      console.log('Message emitted through socket');
     } else {
       console.error('Socket not connected, cannot emit message');
     }
@@ -457,16 +462,17 @@ useEffect(() => {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      console.log('✅ Message saved to database:', response.data);
       
       // Update messages to replace temp message with real one
       setMessages(prev => {
-        const newMessages = prev.filter(msg => msg._id !== tempId);
-        const realExists = newMessages.some(m => m._id === response.data._id);
-        if (!realExists) {
-          return [...newMessages, response.data];
+        const filtered = prev.filter(msg => msg._id !== tempId);
+        
+        // Make sure we don't add duplicate
+        const alreadyExists = filtered.some(m => m._id === response.data._id);
+        if (!alreadyExists) {
+          return [...filtered, response.data];
         }
-        return newMessages;
+        return filtered;
       });
     } catch (error) {
       console.error('❌ Error saving message:', error);
@@ -861,96 +867,96 @@ useEffect(() => {
                             <CheckIcon 
                               sx={{ 
                                 fontSize: 14, 
-                                color: 'success.main' 
+                                color: 'success.main'
                               }} 
-                            />
-                          )}
-                        </Box>
-                      )}
-                    </Box>
-                  </Grow>
-                );
-              })}
-            </Box>
-          ))}
-          
-          <div ref={messagesEndRef} />
-        </Box>
-        
-       {/* Message Input */}
-       <Box sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          p: { xs: 1.5, sm: 2 },
-          gap: 1,
-          borderTop: '1px solid rgba(0, 0, 0, 0.08)',
-          backgroundColor: 'white',
-          boxShadow: '0 -4px 16px rgba(0,0,0,0.05)'
-        }}>
-          <TextField
-            fullWidth
-            variant="outlined"
-            placeholder="Type a message..."
-            value={newMessage}
-            onChange={(e) => {
-              setNewMessage(e.target.value);
-              handleTyping();
-            }}
-            onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-            size="small"
-            multiline
-            maxRows={4}
-            sx={{ 
-             '& .MuiOutlinedInput-root': {
-               borderRadius: 5,
-               backgroundColor: '#f5f7fa',
-               '&:hover': {
-                 backgroundColor: '#f0f2f5',
-               },
-               '&.Mui-focused': {
-                 backgroundColor: 'white',
-               }
-             }
-           }}
-         />
-         <IconButton 
-           color="primary" 
-           onClick={handleSendMessage}
-           disabled={!newMessage.trim()}
-           sx={{ 
-             backgroundColor: 'primary.main',
-             color: 'white',
-             '&:hover': {
-               backgroundColor: 'primary.dark',
-             },
-             '&:disabled': {
-               backgroundColor: 'action.disabledBackground',
-               color: 'action.disabled'
-             }
-           }}
-         >
-           <SendIcon />
-         </IconButton>
+                           />
+                         )}
+                       </Box>
+                     )}
+                   </Box>
+                 </Grow>
+               );
+             })}
+           </Box>
+         ))}
+         
+         <div ref={messagesEndRef} />
        </Box>
-     </Paper>
-     
-     {/* Notification permission snackbar */}
-     {/* <Snackbar
-       open={showNotificationMessage}
-       autoHideDuration={6000}
-       onClose={() => setShowNotificationMessage(false)}
-       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-     >
-       <Alert 
-         onClose={() => setShowNotificationMessage(false)} 
-         severity="success" 
-         sx={{ width: '100%' }}
-       >
-         Notifications enabled! You'll receive alerts for new messages.
-       </Alert>
-     </Snackbar> */}
-   </Container>
- );
+       
+      {/* Message Input */}
+      <Box sx={{ 
+         display: 'flex', 
+         alignItems: 'center', 
+         p: { xs: 1.5, sm: 2 },
+         gap: 1,
+         borderTop: '1px solid rgba(0, 0, 0, 0.08)',
+         backgroundColor: 'white',
+         boxShadow: '0 -4px 16px rgba(0,0,0,0.05)'
+       }}>
+         <TextField
+           fullWidth
+           variant="outlined"
+           placeholder="Type a message..."
+           value={newMessage}
+           onChange={(e) => {
+             setNewMessage(e.target.value);
+             handleTyping();
+           }}
+           onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+           size="small"
+           multiline
+           maxRows={4}
+           sx={{ 
+            '& .MuiOutlinedInput-root': {
+              borderRadius: 5,
+              backgroundColor: '#f5f7fa',
+              '&:hover': {
+                backgroundColor: '#f0f2f5',
+              },
+              '&.Mui-focused': {
+                backgroundColor: 'white',
+              }
+            }
+          }}
+        />
+        <IconButton 
+          color="primary" 
+          onClick={handleSendMessage}
+          disabled={!newMessage.trim()}
+          sx={{ 
+            backgroundColor: 'primary.main',
+            color: 'white',
+            '&:hover': {
+              backgroundColor: 'primary.dark',
+            },
+            '&:disabled': {
+              backgroundColor: 'action.disabledBackground',
+              color: 'action.disabled'
+            }
+          }}
+        >
+          <SendIcon />
+        </IconButton>
+      </Box>
+    </Paper>
+    
+    {/* Notification permission snackbar */}
+    <Snackbar
+      open={showNotificationMessage}
+      autoHideDuration={6000}
+      onClose={() => setShowNotificationMessage(false)}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+      <Alert 
+        onClose={() => setShowNotificationMessage(false)} 
+        severity="success" 
+        sx={{ width: '100%' }}
+      >
+        Notifications enabled! You'll receive alerts for new messages.
+      </Alert>
+    </Snackbar>
+  </Container>
+);
 };
 
 export default Chat;
