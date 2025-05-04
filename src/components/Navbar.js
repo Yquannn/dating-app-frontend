@@ -26,7 +26,7 @@ const Navbar = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   
   useEffect(() => {
-    const newSocket = io('http://localhost:5000');
+    const newSocket = io('https://dating-app-backend-hpju.onrender.com');
     setSocket(newSocket);
     
     return () => {
