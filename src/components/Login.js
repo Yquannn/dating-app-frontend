@@ -24,7 +24,28 @@ const Login = () => {
       await login(email, password);
       navigate('/discover');
     } catch (error) {
-      setError(error.response?.data || 'Failed to login. Please try again.');
+      // More comprehensive error handling
+      console.error('Login Error:', error);
+      
+      // Check different error message sources
+      let errorMessage = 'Failed to login. Please try again.';
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        errorMessage = error.response?.data?.message || 
+                       error.response?.data?.error || 
+                       error.response?.data || 
+                       `Error ${error.response.status}: ${error.response.statusText}`;
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage = 'No response from server. Please check your connection.';
+      } else {
+        // Something happened in setting up the request that triggered an Error
+        errorMessage = error.message || 'An error occurred during login.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
