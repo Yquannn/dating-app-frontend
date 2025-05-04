@@ -41,6 +41,7 @@ const Discover = () => {
     setSwipeAnimation('like');
     
     try {
+      // CHANGED: Updated to use /api/matches/like instead of /api/users/like
       await axios.post(`/api/users/like/${likedUserId}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -140,10 +141,9 @@ const Discover = () => {
             {currentProfile.location && (
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
                 <LocationOnIcon sx={{ color: '#666666', fontSize: 18 }} />
-                <Typography variant="h4" sx={{ fontWeight: 600, mb: 1 }}>
-  {currentProfile.name}, {currentProfile.age}
-</Typography>
-
+                <Typography variant="body2" sx={{ color: '#666666' }}>
+                  {currentProfile.location.city || 'Location not available'}
+                </Typography>
               </Stack>
             )}
             
