@@ -20,6 +20,22 @@ import DoneAllIcon from '@mui/icons-material/DoneAll';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useNavigate } from 'react-router-dom';
 
+// Helper function to convert VAPID key
+const urlBase64ToUint8Array = (base64String) => {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+  
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+};
+
 const Chat = () => {
   const { matchId } = useParams();
   const [messages, setMessages] = useState([]);
@@ -32,54 +48,124 @@ const Chat = () => {
   const [menuAnchorEl, setMenuAnchorEl] = useState(null);
   const [notificationPermission, setNotificationPermission] = useState(null);
   const [showNotificationMessage, setShowNotificationMessage] = useState(false);
+  const [registrationAvailable, setRegistrationAvailable] = useState(false);
   const userId = localStorage.getItem('userId');
   const messagesEndRef = useRef(null);
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const messageText = newMessage.trim();
+
   
-  // Check notification permission
+  // Check notification permission and service worker
   useEffect(() => {
-    if ('Notification' in window) {
-      Notification.requestPermission().then(permission => {
-        setNotificationPermission(permission);
-        if (permission === 'granted') {
-          subscribeUserToPush();
-        }
+    // Check if service worker is available
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        setRegistrationAvailable(true);
+        console.log('Service Worker ready:', registration.scope);
+      }).catch((error) => {
+        console.error('Service Worker error:', error);
       });
+    }
+
+    // Check notification permission
+    if ('Notification' in window) {
+      const permission = Notification.permission;
+      setNotificationPermission(permission);
+      
+      if (permission === 'granted') {
+        subscribeUserToPush();
+      }
     }
   }, []);
   
   // Initialize socket connection
   useEffect(() => {
-    const newSocket = io('https://dating-app-backend-hpju.onrender.com', {
-      transports: ['websocket'],
-      upgrade: false,
-      reconnection: true,
-      reconnectionAttempts: 5
-    });
-    
-    newSocket.on('connect', () => {
-      console.log('Socket connected successfully:', newSocket.id);
-    });
-    
-    newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
-    });
-    
-    setSocket(newSocket);
+    const initSocket = () => {
+      // Ensure token is available
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No auth token found');
+        return;
+      }
+
+      const newSocket = io('https://dating-app-backend-hpju.onrender.com', {
+        transports: ['websocket', 'polling'], // Add polling as fallback
+        upgrade: true,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        auth: {
+          token: token // Add authentication token
+        }
+      });
+      
+      newSocket.on('connect', () => {
+        console.log('Socket connected successfully:', newSocket.id);
+        // Emit join_chat immediately after connection
+        if (matchId && userId) {
+          console.log('Emitting join_chat:', { chatId: matchId, userId });
+          newSocket.emit('join_chat', { chatId: matchId, userId });
+        }
+      });
+      
+      newSocket.on('connect_error', (error) => {
+        console.error('Socket connection error:', error);
+      });
+      
+      newSocket.on('disconnect', (reason) => {
+        console.log('Socket disconnected:', reason);
+        // Attempt immediate reconnection for certain disconnect reasons
+        if (reason === 'io server disconnect') {
+          newSocket.connect();
+        }
+      });
+      
+      setSocket(newSocket);
+    };
+
+    initSocket();
     
     return () => {
-      newSocket.disconnect();
+      if (socket) {
+        socket.disconnect();
+      }
     };
-  }, []);
+  }, []); // Empty dependency array - initialize once
+
+  // In your Chat component
+useEffect(() => {
+  const setupNotifications = async () => {
+    // Check if notifications are supported
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+      console.log('Notifications not supported');
+      return;
+    }
+    
+    try {
+      // Request permission
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      
+      if (permission === 'granted') {
+        // Subscribe to push notifications
+        await subscribeUserToPush();
+      }
+    } catch (error) {
+      console.error('Error setting up notifications:', error);
+    }
+  };
+  
+  setupNotifications();
+}, []); // Run once on component mount
   
   // Subscribe to push notifications
   const subscribeUserToPush = async () => {
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       try {
         const registration = await navigator.serviceWorker.ready;
-        const publicKey = 'YOUR_VAPID_PUBLIC_KEY'; // Replace with your VAPID public key
+        const publicKey = process.env.REACT_APP_VAPID_PUBLIC_KEY // Replace with your VAPID public key
         
         const subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
@@ -100,22 +186,6 @@ const Chat = () => {
         console.error('Error subscribing to push notifications:', error);
       }
     }
-  };
-  
-  // Helper function to convert VAPID key
-  const urlBase64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-      .replace(/\-/g, '+')
-      .replace(/_/g, '/');
-    
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
   };
   
   // Show push notification
@@ -174,16 +244,77 @@ const Chat = () => {
     }
   };
   
+  // Test push notification function
+  const testPushNotification = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('Push notifications not supported in this browser');
+      return;
+    }
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      
+      // Check if already subscribed or subscribe
+      let subscription = await registration.pushManager.getSubscription();
+      
+      if (!subscription) {
+        const publicKey = process.env.REACT_APP_VAPID_PUBLIC_KEY; // Replace with your actual VAPID key
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey)
+        });
+      }
+      
+      // Test notification options
+      const message = {
+        title: 'New Message',
+        body: messageText,
+        chatId: matchId,
+        messageId: 'test-msg-' + Date.now()
+      };
+      
+      // Show notification directly (for testing)
+      registration.showNotification(message.title, {
+        body: message.body,
+        icon: '/logo192.png',
+        badge: '/badge.png',
+        data: message,
+        vibrate: [100, 50, 100],
+        actions: [
+          {
+            action: 'view',
+            title: 'View',
+            icon: '/view-icon.png'
+          }
+        ]
+      });
+      
+      console.log('Test notification sent');
+      setShowNotificationMessage(true);
+    } catch (error) {
+      console.error('Error testing notification:', error);
+      alert('Error testing notification: ' + error.message);
+    }
+  };
+  
   // Join chat room and set up event listeners
   useEffect(() => {
     if (!socket || !matchId || !userId) return;
     
-    console.log('Joining chat room:', matchId);
-    socket.emit('join_chat', { chatId: matchId, userId });
+    console.log('Setting up socket event listeners');
+    console.log('Current socket:', socket.id);
+    console.log('MatchId:', matchId, 'UserId:', userId);
+    
+    // Important: Join chat room when socket is connected
+    if (socket.connected) {
+      console.log('Emitting join_chat:', { chatId: matchId, userId });
+      socket.emit('join_chat', { chatId: matchId, userId });
+    }
     
     // Set up message listener
     const messageListener = (message) => {
-      console.log('New message received:', message);
+      console.log('📨 New message received:', message);
+      console.log('Message ID:', message._id, 'Sender:', message.sender);
       
       // Check if chat is not active/in focus
       if (document.hidden && message.sender !== userId) {
@@ -191,20 +322,38 @@ const Chat = () => {
       }
       
       setMessages((prevMessages) => {
-        const exists = prevMessages.some(
-          m => m._id === message._id || 
-              (m.sender === message.sender && 
-               m.text === message.text && 
-               new Date(m.createdAt).getTime() === new Date(message.createdAt).getTime())
+        console.log('Current messages:', prevMessages.length);
+        
+        // Update temporary message if it exists
+        const tempMessageIndex = prevMessages.findIndex(
+          m => m._id?.startsWith('temp-') && 
+             m.sender === message.sender && 
+             m.text === message.text
         );
         
-        if (exists) return prevMessages;
+        if (tempMessageIndex !== -1) {
+          console.log('Updating temporary message at index:', tempMessageIndex);
+          const newMessages = [...prevMessages];
+          newMessages[tempMessageIndex] = message;
+          return newMessages;
+        }
+        
+        // Check if message already exists
+        const exists = prevMessages.some(m => m._id === message._id);
+        
+        if (exists) {
+          console.log('Message already exists:', message._id);
+          return prevMessages;
+        }
+        
+        console.log('Adding new message:', message._id);
         return [...prevMessages, message];
       });
     };
     
-    const typingListener = (typingUserId) => {
-      if (typingUserId !== userId) {
+    const typingListener = (data) => {
+      console.log('👋 User typing:', data);
+      if (data.userId !== userId) {
         setIsTyping(true);
         setTimeout(() => setIsTyping(false), 3000);
       }
@@ -223,6 +372,7 @@ const Chat = () => {
           return;
         }
         
+        console.log('Fetching initial data...');
         const [matchRes, messagesRes] = await Promise.all([
           axios.get(`/api/matches/${matchId}`, {
             headers: { Authorization: `Bearer ${token}` }
@@ -231,6 +381,9 @@ const Chat = () => {
             headers: { Authorization: `Bearer ${token}` }
           })
         ]);
+        
+        console.log('Fetched match info:', matchRes.data);
+        console.log('Fetched messages:', messagesRes.data.length);
         
         setMatchInfo(matchRes.data);
         setMessages(messagesRes.data);
@@ -244,19 +397,25 @@ const Chat = () => {
     fetchData();
     
     return () => {
+      console.log('Cleaning up socket event listeners');
       socket.off('receive_message', messageListener);
       socket.off('user_typing', typingListener);
     };
   }, [socket, matchId, userId]);
   
   const handleTyping = () => {
-    if (!socket || !matchId) return;
+    if (!socket || !matchId || !userId) return;
     
     if (typingTimeout) clearTimeout(typingTimeout);
     
-    socket.emit('typing', { chatId: matchId, userId });
+    if (socket.connected) {
+      console.log('Emitting typing event');
+      socket.emit('typing', { chatId: matchId, userId });
+    }
     
-    const timeout = setTimeout(() => {}, 1000);
+    const timeout = setTimeout(() => {
+      // Timeout logic here if needed
+    }, 1000);
     
     setTypingTimeout(timeout);
   };
@@ -296,35 +455,65 @@ const Chat = () => {
       return;
     }
     
+    // Prepare message data
+    setNewMessage(''); // Clear input immediately
+    
     const messageData = {
       chatId: matchId,
       sender: userId,
-      text: newMessage,
-      createdAt: new Date()
+      text: messageText,
+      createdAt: new Date().toISOString()
     };
     
-    const optimisticMessage = { ...messageData, _id: `temp-${Date.now()}` };
-    setMessages(prev => [...prev, optimisticMessage]);
-    setNewMessage('');
+    // Create optimistic message
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const optimisticMessage = { ...messageData, _id: tempId };
     
-    socket.emit('send_message', messageData);
+    console.log('📤 Sending message:', messageData);
+    console.log('Optimistic message ID:', tempId);
+    
+    // Add optimistic message
+    setMessages(prev => [...prev, optimisticMessage]);
+    
+    // Emit through socket IMMEDIATELY
+    if (socket.connected) {
+      console.log('Socket status:', socket.connected ? 'connected' : 'disconnected');
+      socket.emit('send_message', messageData);
+      console.log('Message emitted through socket');
+      testPushNotification(messageData); // Test push notification
+    } else {
+      console.error('Socket not connected, cannot emit message');
+    }
     
     try {
+      // Save to database
       const response = await axios.post('/api/messages', messageData, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      setMessages(prev => 
-        prev.map(msg => 
-          msg._id === optimisticMessage._id ? response.data : msg
-        )
-      );
+      console.log('✅ Message saved to database:', response.data);
+      
+      // Update messages to replace temp message with real one
+      setMessages(prev => {
+        const newMessages = prev.filter(msg => msg._id !== tempId);
+        const realExists = newMessages.some(m => m._id === response.data._id);
+        if (!realExists) {
+          return [...newMessages, response.data];
+        }
+        return newMessages;
+      });
     } catch (error) {
-      console.error('Error saving message:', error);
-      setMessages(prev => prev.filter(msg => msg._id !== optimisticMessage._id));
+      console.error('❌ Error saving message:', error);
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(msg => msg._id !== tempId));
       alert('Failed to send message. Please try again.');
     }
   };
+
+
+
+
+
   
   const formatMessageTime = (timestamp) => {
     const date = new Date(timestamp);
@@ -510,9 +699,26 @@ const Chat = () => {
                 )}
               </Box>
               
+              {/* Test Notification Button in Header */}
+              {/* <Button 
+                onClick={testPushNotification}
+                variant="contained"
+                color="secondary"
+                size="small"
+                sx={{ 
+                  ml: 1,
+                  minWidth: 'auto',
+                  px: 1.5
+                }}
+                disabled={!registrationAvailable}
+              >
+                Test
+              </Button>
+               */}
               <IconButton 
                 color="inherit"
                 onClick={handleMenuOpen}
+                sx={{ ml: 1 }}
               >
                 <MoreVertIcon />
               </IconButton>
@@ -726,8 +932,8 @@ const Chat = () => {
           <div ref={messagesEndRef} />
         </Box>
         
-        {/* Message Input */}
-        <Box sx={{ 
+       {/* Message Input */}
+       <Box sx={{ 
           display: 'flex', 
           alignItems: 'center', 
           p: { xs: 1.5, sm: 2 },
@@ -780,6 +986,22 @@ const Chat = () => {
           >
             <SendIcon />
           </IconButton>
+          
+          {/* Test Notification Button in Input Area
+          <Button 
+            onClick={testPushNotification}
+            variant="outlined"
+            color="secondary"
+            size="small"
+            startIcon={<NotificationsIcon />}
+            disabled={!registrationAvailable}
+            sx={{ 
+              minWidth: 'auto',
+              px: 1
+            }}
+          >
+            {isMobile ? 'Test' : 'Test Push'}
+          </Button> */}
         </Box>
       </Paper>
       

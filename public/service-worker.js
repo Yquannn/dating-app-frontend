@@ -1,72 +1,65 @@
 // public/service-worker.js
-self.addEventListener('push', function(e) {
-    console.log('Push event received:', e);
-    
-    let data = {};
-    if (e.data) {
-      data = e.data.json();
-    }
-    
-    const title = data.title || 'New message';
-    const body = data.body || 'You have a new message';
-    const icon = '/logo192.png';
-    const badge = '/badge.png';
-    
-    const options = {
-      body: body,
-      icon: icon,
-      badge: badge,
-      vibrate: [100, 50, 100],
-      data: {
-        url: data.url || '/chat/' + data.chatId
-      },
-      actions: [
-        {
-          action: 'view',
-          title: 'View'
-        },
-        {
-          action: 'dismiss',
-          title: 'Dismiss'
-        }
-      ]
-    };
-    
-    e.waitUntil(
-      self.registration.showNotification(title, options)
-    );
-  });
+self.addEventListener('push', event => {
+  console.log('Push event received:', event);
   
-  self.addEventListener('notificationclick', function(e) {
-    const clickedNotification = e.notification;
-    clickedNotification.close();
+  if (!event.data) {
+    console.error('No push data received');
+    return;
+  }
+  
+  const data = event.data.json();
+  console.log('Push notification data:', data);
+  
+  const title = data.title;
+  const options = {
+    body: data.body,
+    icon: '/logo192.png',
+    badge: '/badge.png',
+    vibrate: [100, 50, 100],
+    data: data.data, // Make sure to pass the data object
+    actions: [
+      {
+        action: 'view',
+        title: 'View Chat',
+        icon: '/view-icon.png'
+      },
+      {
+        action: 'dismiss',
+        title: 'Dismiss',
+        icon: '/dismiss-icon.png'
+      }
+    ],
+    tag: `chat-${data.data.chatId}`, // Use tag to replace old notifications
+    renotify: true // Re-alert the user even if the tag matches
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  
+  const data = event.notification.data;
+  
+  if (event.action === 'view') {
+    const chatUrl = data.url;
     
-    // Handle the notification click
-    if (e.action === 'view') {
-      // Open the chat URL
-      const urlToOpen = e.notification.data.url;
-      const promiseChain = clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true
-      })
-      .then((windowClients) => {
-        let matchingClient = null;
-        
-        for (let i = 0; i < windowClients.length; i++) {
-          const windowClient = windowClients[i];
-          if (windowClient.url.includes(urlToOpen)) {
-            matchingClient = windowClient;
-            break;
+    event.waitUntil(
+      clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+        // Check if a window is already open with the target URL
+        for (let i = 0; i < clientList.length; i++) {
+          const client = clientList[i];
+          if (client.url.includes(chatUrl) && 'focus' in client) {
+            return client.focus();
           }
         }
-        
-        if (matchingClient) {
-          return matchingClient.focus();
-        } else {
-          return clients.openWindow(urlToOpen);
+        // If no window found, open a new one
+        if (clients.openWindow) {
+          return clients.openWindow(chatUrl);
         }
-      });
-      
-      e.waitUntil(promiseChain);
-    }
-  });
+      })
+    );
+  }
+});
