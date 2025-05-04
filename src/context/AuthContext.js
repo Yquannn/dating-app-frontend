@@ -2,7 +2,7 @@
 import React, { createContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
-const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const baseURL = 'https://dating-app-backend-hpju.onrender.com ';
 axios.defaults.baseURL = baseURL;
 console.log('Using API URL:', baseURL);
 
@@ -57,25 +57,71 @@ export const AuthProvider = ({ children }) => {
     setCurrentUser(null);
   };
 
-  const updateProfile = async (userData) => {
-    const token = localStorage.getItem('token');
-    const response = await axios.put(`/api/users/${currentUser._id}`, userData, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    setCurrentUser(response.data);
-    return response.data;
-  };
 
-  return (
-    <AuthContext.Provider value={{ 
-      currentUser, 
-      loading, 
-      login, 
-      register, 
-      logout,
-      updateProfile
-    }}>
-      {children}
-    </AuthContext.Provider>
+// AuthContext.js
+const updateProfile = async (userData) => {
+  const token = localStorage.getItem('token');
+  const userId = currentUser?._id;
+  
+  if (!userId) {
+    throw new Error('User ID not found');
+  }
+  
+  const response = await axios.put(
+    `/api/users/${userId}`, 
+    userData, 
+    {
+      headers: { 
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    }
   );
+  
+  setCurrentUser(response.data);
+  return response.data;
 };
+// Update specific parts of profile if needed
+const updateLocation = async (coordinates) => {
+  const token = localStorage.getItem('token');
+  const userId = currentUser?._id;
+  
+  const response = await axios.put(`/api/users/${userId}/location`, 
+    { longitude: coordinates[0], latitude: coordinates[1] },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  
+  setCurrentUser(response.data);
+  return response.data;
+};
+
+const updatePreferences = async (preferences) => {
+  const token = localStorage.getItem('token');
+  const userId = currentUser?._id;
+  
+  const response = await axios.put(`/api/users/${userId}/preferences`, preferences, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  
+  setCurrentUser(response.data);
+  return response.data;
+};
+
+// ... rest of your code
+
+return (
+  <AuthContext.Provider value={{ 
+    currentUser, 
+    loading, 
+    login, 
+    register, 
+    logout,
+    updateProfile,
+    updateLocation,
+    updatePreferences
+  }}>
+    {children}
+  </AuthContext.Provider>
+);
+
+}
